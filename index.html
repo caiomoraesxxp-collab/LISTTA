@@ -7,6 +7,11 @@
 <title>LISTTA</title>
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>window.SUPABASE_URL="https://auzuwjupbyqmvpwhquyl.supabase.co";window.SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1enV3anVwYnlxbXZwd2hxdXlsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2NTI0ODYsImV4cCI6MjEwNzIyODQ4Nn0.tkhmJcs9uYYmVyoGInKCmS0RkyB9d8dS9Wf1oYsATZg";</script>
+  <meta property="og:image" content="https://bolt.new/static/og_default.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
 </head>
 <body>
 <header class="top">
@@ -14,7 +19,10 @@
     <div class="brand">LISTTA</div>
     <div class="subtitle">ATENDIMENTOS ESCOLARES</div>
   </div>
-  <button id="installBtn" class="icon-btn" hidden>＋</button>
+  <div class="top-right">
+    <span id="syncIndicator" class="sync-dot offline" title="OFFLINE"></span>
+    <button id="installBtn" class="icon-btn" hidden>＋</button>
+  </div>
 </header>
 
 <main>
@@ -47,7 +55,10 @@
       <span class="eyebrow">ESCOLA</span>
       <h1 id="schoolTitle">ESCOLA</h1>
     </div>
-    <button class="secondary" onclick="openPersonModal()">＋ ATENDIMENTO</button>
+    <div class="head-actions">
+      <button class="secondary" onclick="openPersonModal()">＋ ATENDIMENTO</button>
+      <button class="secondary import-btn" onclick="openImportModal()">IMPORTAR</button>
+    </div>
   </div>
 
   <div class="tabs">
@@ -70,12 +81,23 @@
     <button class="primary" onclick="exportReport()">EXPORTAR</button>
   </div>
   <div id="globalReport" class="report"></div>
+  <div class="report-divider"></div>
+  <div class="hero compact">
+    <div><span class="eyebrow">HISTÓRICO</span><h1>RELATÓRIOS ANTIGOS</h1></div>
+  </div>
+  <div class="report-controls">
+    <div class="searchbox" style="margin:0">
+      <span>📅</span><input type="date" id="reportDate" onchange="renderOldReport()">
+    </div>
+    <button class="primary export-old-btn" onclick="exportOldReport()">BAIXAR RELATÓRIO DA DATA</button>
+  </div>
+  <div id="oldReport" class="report"></div>
 </section>
 </main>
 
 <nav class="bottom">
   <button class="nav active" onclick="showScreen('home',this)">⌂<small>ESCOLAS</small></button>
-  <button class="nav" onclick="showScreen('reports',this);renderGlobalReport()">▤<small>RELATÓRIO</small></button>
+  <button class="nav" onclick="showScreen('reports',this);renderGlobalReport();renderOldReport()">▤<small>RELATÓRIO</small></button>
 </nav>
 
 <div id="modal" class="modal" hidden>
