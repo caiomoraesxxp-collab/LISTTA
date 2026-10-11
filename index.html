@@ -1,112 +1,118 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#111827">
-<title>LISTTA</title>
-<link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="style.css">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script>window.SUPABASE_URL="https://auzuwjupbyqmvpwhquyl.supabase.co";window.SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1enV3anVwYnlxbXZwd2hxdXlsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE2NTI0ODYsImV4cCI6MjEwNzIyODQ4Nn0.tkhmJcs9uYYmVyoGInKCmS0RkyB9d8dS9Wf1oYsATZg";</script>
-  <meta property="og:image" content="https://bolt.new/static/og_default.png">
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:image" content="https://bolt.new/static/og_default.png">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>LISTTA</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    window.SUPABASE_URL = "https://auzuwjupbyqmvpwhquyl.supabase.co";
+    window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF1enV3anVwYnlxbXZwd2hxdXlsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjgzMDAxNjYsImV4cCI6MTczNTk1NzE2Nn0.A0eOQm7Pp9FAh7EJO_hWyaZKzaUVGnf3tU6aRf3vvKs";
+  </script>
 </head>
 <body>
-<header class="top">
-  <div>
-    <div class="brand">LISTTA</div>
-    <div class="subtitle">ATENDIMENTOS ESCOLARES</div>
-  </div>
-  <div class="top-right">
-    <span id="syncIndicator" class="sync-dot offline" title="OFFLINE"></span>
-    <button id="installBtn" class="icon-btn" hidden>＋</button>
-  </div>
-</header>
-
-<main>
-<section id="home" class="screen active">
-  <div class="hero">
+  <header class="top">
     <div>
-      <span class="eyebrow">PAINEL</span>
-      <h1>MINHAS ESCOLAS</h1>
-      <p>ORGANIZE SEUS ATENDIMENTOS DE FORMA RÁPIDA.</p>
+      <div class="brand">LISTTA</div>
+      <div class="subtitle">ATENDIMENTOS ESCOLARES</div>
     </div>
-    <button class="primary" onclick="openSchoolModal()">＋ NOVA ESCOLA</button>
-  </div>
-
-  <div class="stats">
-    <div class="stat"><b id="schoolCount">0</b><span>ESCOLAS</span></div>
-    <div class="stat"><b id="todayCount">0</b><span>ATENDIMENTOS HOJE</span></div>
-    <div class="stat"><b id="doneCount">0</b><span>CONCLUÍDOS</span></div>
-  </div>
-
-  <div class="searchbox">
-    <span>⌕</span><input id="schoolSearch" placeholder="PESQUISAR ESCOLA..." oninput="renderSchools()">
-  </div>
-  <div id="schoolList" class="cards"></div>
-</section>
-
-<section id="school" class="screen">
-  <button class="back" onclick="goHome()">‹ VOLTAR</button>
-  <div class="school-head">
-    <div>
-      <span class="eyebrow">ESCOLA</span>
-      <h1 id="schoolTitle">ESCOLA</h1>
+    <div class="top-right">
+      <span id="syncIndicator" class="sync-dot offline" title="OFFLINE"></span>
+      <button id="installBtn" class="icon-btn" hidden>＋</button>
     </div>
-    <div class="head-actions">
-      <button class="secondary" onclick="openPersonModal()">＋ ATENDIMENTO</button>
-      <button class="secondary import-btn" onclick="openImportModal()">IMPORTAR</button>
+  </header>
+
+  <main>
+    <section id="home" class="screen active">
+      <div class="hero">
+        <div>
+          <span class="eyebrow">PAINEL</span>
+          <h1>MINHAS ESCOLAS</h1>
+          <p>ORGANIZE SEUS ATENDIMENTOS DE FORMA RÁPIDA.</p>
+        </div>
+        <button class="primary" onclick="openSchoolModal()">＋ NOVA ESCOLA</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b id="schoolCount">0</b><span>ESCOLAS</span></div>
+        <div class="stat"><b id="todayCount">0</b><span>ATENDIMENTOS HOJE</span></div>
+        <div class="stat"><b id="doneCount">0</b><span>CONCLUÍDOS</span></div>
+      </div>
+
+      <div class="searchbox">
+        <span>⌕</span>
+        <input id="schoolSearch" placeholder="PESQUISAR ESCOLA..." oninput="renderSchools()">
+      </div>
+      <div id="schoolList" class="cards"></div>
+    </section>
+
+    <section id="school" class="screen">
+      <button class="back" onclick="goHome()">‹ VOLTAR</button>
+      <div class="school-head">
+        <div>
+          <span class="eyebrow">ESCOLA</span>
+          <h1 id="schoolTitle">ESCOLA</h1>
+        </div>
+        <div class="head-actions">
+          <button class="secondary" onclick="openPersonModal()">＋ ATENDIMENTO</button>
+          <button class="secondary import-btn" onclick="openImportModal()">IMPORTAR</button>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" onclick="setTab('queue',this)">LISTA</button>
+        <button class="tab" onclick="setTab('report',this)">RELATÓRIO</button>
+      </div>
+
+      <div id="queueTab">
+        <div class="searchbox">
+          <span>⌕</span>
+          <input id="personSearch" placeholder="PESQUISAR NOME..." oninput="renderPeople()">
+        </div>
+        <div id="peopleList" class="people"></div>
+      </div>
+      <div id="reportTab" hidden>
+        <div id="schoolReport" class="report"></div>
+      </div>
+    </section>
+
+    <section id="reports" class="screen">
+      <div class="hero compact">
+        <div><span class="eyebrow">VISÃO GERAL</span><h1>RELATÓRIO GERAL</h1></div>
+        <button class="primary" onclick="exportReport()">EXPORTAR</button>
+      </div>
+      <div id="globalReport" class="report"></div>
+      <div class="report-divider"></div>
+      <div class="hero compact">
+        <div><span class="eyebrow">HISTÓRICO</span><h1>RELATÓRIOS ANTIGOS</h1></div>
+      </div>
+      <div class="report-controls">
+        <div class="searchbox" style="margin:0">
+          <span>📅</span>
+          <input type="date" id="reportDate" onchange="renderOldReport()">
+        </div>
+        <button class="primary export-old-btn" onclick="exportOldReport()">BAIXAR RELATÓRIO DA DATA</button>
+      </div>
+      <div id="oldReport" class="report"></div>
+    </section>
+  </main>
+
+  <nav class="bottom">
+    <button class="nav active" onclick="showScreen('home',this)">⌂<small>ESCOLAS</small></button>
+    <button class="nav" onclick="showScreen('reports',this);renderGlobalReport();renderOldReport()">▤<small>RELATÓRIO</small></button>
+  </nav>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card">
+      <button class="close" onclick="closeModal()">×</button>
+      <h2 id="modalTitle">NOVA ESCOLA</h2>
+      <div id="modalBody"></div>
     </div>
   </div>
 
-  <div class="tabs">
-    <button class="tab active" onclick="setTab('queue',this)">LISTA</button>
-    <button class="tab" onclick="setTab('report',this)">RELATÓRIO</button>
-  </div>
-
-  <div id="queueTab">
-    <div class="searchbox"><span>⌕</span><input id="personSearch" placeholder="PESQUISAR NOME..." oninput="renderPeople()"></div>
-    <div id="peopleList" class="people"></div>
-  </div>
-  <div id="reportTab" hidden>
-    <div id="schoolReport" class="report"></div>
-  </div>
-</section>
-
-<section id="reports" class="screen">
-  <div class="hero compact">
-    <div><span class="eyebrow">VISÃO GERAL</span><h1>RELATÓRIO GERAL</h1></div>
-    <button class="primary" onclick="exportReport()">EXPORTAR</button>
-  </div>
-  <div id="globalReport" class="report"></div>
-  <div class="report-divider"></div>
-  <div class="hero compact">
-    <div><span class="eyebrow">HISTÓRICO</span><h1>RELATÓRIOS ANTIGOS</h1></div>
-  </div>
-  <div class="report-controls">
-    <div class="searchbox" style="margin:0">
-      <span>📅</span><input type="date" id="reportDate" onchange="renderOldReport()">
-    </div>
-    <button class="primary export-old-btn" onclick="exportOldReport()">BAIXAR RELATÓRIO DA DATA</button>
-  </div>
-  <div id="oldReport" class="report"></div>
-</section>
-</main>
-
-<nav class="bottom">
-  <button class="nav active" onclick="showScreen('home',this)">⌂<small>ESCOLAS</small></button>
-  <button class="nav" onclick="showScreen('reports',this);renderGlobalReport();renderOldReport()">▤<small>RELATÓRIO</small></button>
-</nav>
-
-<div id="modal" class="modal" hidden>
-  <div class="modal-card">
-    <button class="close" onclick="closeModal()">×</button>
-    <h2 id="modalTitle">NOVA ESCOLA</h2>
-    <div id="modalBody"></div>
-  </div>
-</div>
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
