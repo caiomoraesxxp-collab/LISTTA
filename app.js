@@ -64,7 +64,6 @@ document.addEventListener("click",e=>{
 
 function save(){
   localStorage.setItem(KEY,JSON.stringify(data));
-  lastSyncHash=dataHash();
   renderSchools();
   updateStats();
   scheduleSync();
@@ -252,47 +251,56 @@ function scheduleSync(){
 async function doSync(){
   if(!supa||isSyncing)return;
   if(!navigator.onLine){setSyncIndicator("offline");return}
-  if(dataHash()===lastSyncHash)return;
   isSyncing=true;
   setSyncIndicator("syncing");
   try{
     let ids=getSyncIds();
-    await pushToRemote(ids);
+    // Enviar somente quando houve alteração local; sempre consultar o remoto,
+    // inclusive em dispositivos novos e após eventos de tempo real.
+    if(dataHash()!==lastSyncHash) await pushToRemote(ids);
     await pullFromRemote(ids);
     lastSyncHash=dataHash();
     setSyncIndicator("online");
   }catch(e){
     console.warn("Sync error",e);
     setSyncIndicator("offline");
+  }finally{
+    isSyncing=false;
   }
-  isSyncing=false;
 }
 
 async function pushToRemote(ids){
   for(let s of data.schools){
     let sid=String(s.id);
     if(ids.schools[sid]){
-      await supa.from("schools").update({
+      const {error}=await supa.from("schools").update({
         name:s.name,updated_at:new Date().toISOString(),deleted:false
       }).eq("id",ids.schools[sid]);
+      if(error)throw error;
     }else{
       let{data:row,error}=await supa.from("schools").insert({
-        name:s.name
+        name:s.name,deleted:false,updated_at:new Date().toISOString()
       }).select("id").maybeSingle();
+      if(error)throw error;
       if(row)ids.schools[sid]=row.id;
+      else throw new Error("Não foi possível salvar a escola no servidor.");
     }
     for(let p of s.people){
       let pid=String(p.id);
       if(ids.people[pid]){
-        await supa.from("people").update({
+        const {error}=await supa.from("people").update({
           name:p.name,note:p.note||"",status:p.status,date:p.date,shift:p.shift,doctor:p.doctor||"",
           updated_at:new Date().toISOString(),deleted:false
         }).eq("id",ids.people[pid]);
+        if(error)throw error;
       }else{
+        if(!ids.schools[sid])throw new Error("A escola ainda não foi sincronizada.");
         let{data:row,error}=await supa.from("people").insert({
-          school_id:ids.schools[sid],name:p.name,note:p.note||"",status:p.status,date:p.date,shift:p.shift,doctor:p.doctor||""
+          school_id:ids.schools[sid],name:p.name,note:p.note||"",status:p.status,date:p.date,shift:p.shift,doctor:p.doctor||"",deleted:false,updated_at:new Date().toISOString()
         }).select("id").maybeSingle();
+        if(error)throw error;
         if(row)ids.people[pid]=row.id;
+        else throw new Error("Não foi possível salvar o atendimento no servidor.");
       }
     }
   }
@@ -305,11 +313,23 @@ async function pullFromRemote(ids){
   let remoteSchoolIds={};
   let remotePeopleIds={};
   (remoteSchools||[]).forEach(rs=>{
-    let localId=Object.keys(ids.schools).find(k=>ids.schools[k]===rs.id);
+    let localId=Object.keys(ids.schools).find(k=>String(ids.schools[k])===String(rs.id));
     if(localId){
       remoteSchoolIds[localId]=rs;
-      let s=data.schools.find(x=>String(x.id)===localId);
-      if(s&&rs.name)s.name=rs.name;
+      let school=data.schools.find(x=>String(x.id)===localId);
+      if(school&&rs.name&&school.name!==rs.name)school.name=rs.name;
+    }else{
+      // Uma escola criada em outro celular/computador precisa ser criada localmente
+      // e vinculada ao ID remoto para que seus alunos também sejam importados.
+      let existing=data.schools.find(x=>x.name.trim().toUpperCase()===String(rs.name||"").trim().toUpperCase());
+      if(existing){
+        localId=String(existing.id);
+      }else{
+        localId=String(Date.now()+Math.floor(Math.random()*100000));
+        data.schools.push({id:Number(localId),name:rs.name||"ESCOLA",people:[]});
+      }
+      ids.schools[localId]=rs.id;
+      remoteSchoolIds[localId]=rs;
     }
   });
   let{data:remotePeople,error:pe}=await supa.from("people").select("id,school_id,name,note,status,date,shift,doctor,deleted,updated_at").eq("deleted",false);
