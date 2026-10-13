@@ -1,10 +1,10 @@
 {
-  "name":"LISTTA",
+  "name":"LISTTA — ATENDIMENTOS ESCOLARES",
   "short_name":"LISTTA",
   "start_url":"./index.html",
   "display":"standalone",
-  "background_color":"#f5f7fb",
-  "theme_color":"#111827",
+  "background_color":"#f5f8f5",
+  "theme_color":"#f47b20",
   "orientation":"portrait",
   "icons":[]
 }
