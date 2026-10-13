@@ -1,451 +1,59 @@
-const KEY="listta_v1";
-let data=JSON.parse(localStorage.getItem(KEY)||'null')||{schools:[]};
-let currentSchool=null;
-let currentShift=null;
-let deferredPrompt=null;
-let supa=null;
-let syncTimer=null;
-let isSyncing=false;
-let lastSyncHash="";
-const SYNC_KEY="listta_sync_ids";
-
-const STATUS_OPTS=[
-  {key:"nao_chegou",label:"NÃO CHEGOU",color:"#667085"},
-  {key:"atendido",label:"ATENDIDO",color:"#16a34a"},
-  {key:"faltou",label:"FALTOU",color:"#dc2626"},
-  {key:"foi_embora",label:"FOI EMBORA",color:"#ea580c"}
-];
-
-function statusLabel(k){let o=STATUS_OPTS.find(x=>x.key===k);return o?o.label:"NÃO CHEGOU"}
-function statusColor(k){let o=STATUS_OPTS.find(x=>x.key===k);return o?o.color:"#667085"}
-function formatDate(d){if(!d)return "";let p=d.split("-");return p.length===3?`${p[2]}/${p[1]}/${p[0]}`:d}
-
-function getSyncIds(){try{return JSON.parse(localStorage.getItem(SYNC_KEY)||'{"schools":{},"people":{}}')}catch(e){return{"schools":{},"people":{}}}}
-function saveSyncIds(ids){localStorage.setItem(SYNC_KEY,JSON.stringify(ids))}
-function dataHash(){return JSON.stringify(data.schools)}
-
-(function migrate(){
-  let changed=false;
-  data.schools.forEach(s=>{
-    s.people.forEach(p=>{
-      if(p.status===undefined){
-        p.status=p.done?"atendido":"nao_chegou";
-        if(p.done!==undefined){delete p.done;changed=true}
-      }
-      if(!p.date){p.date=(p.created?new Date(p.created):new Date()).toISOString().split("T")[0];changed=true}
-      if(!p.shift){p.shift="manha";changed=true}
-      if(p.doctor===undefined){p.doctor="";changed=true}
-    });
-  });
-  if(changed)localStorage.setItem(KEY,JSON.stringify(data));
-})();
-
-(function initSupabase(){
-  const url=window.SUPABASE_URL;
-  const key=window.SUPABASE_ANON_KEY;
-  if(!url||!key||typeof window.supabase==="undefined")return;
-  try{
-    supa=window.supabase.createClient(url,key,{realtime:{params:{eventsPerSecond:10}}});
-  }catch(e){console.warn("Supabase init failed",e)}
-})();
-
-function setSyncIndicator(state){
-  let el=document.getElementById("syncIndicator");
-  if(!el)return;
-  el.className="sync-dot "+state;
-  el.title=state==="online"?"SINCRONIZADO":state==="syncing"?"SINCRONIZANDO...":"OFFLINE";
-}
-
-window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredPrompt=e;document.getElementById("installBtn").hidden=false});
-document.getElementById("installBtn").onclick=async()=>{if(deferredPrompt){deferredPrompt.prompt();deferredPrompt=null}};
-
-document.addEventListener("click",e=>{
-  if(!e.target.closest(".person-actions"))document.querySelectorAll(".status-menu").forEach(x=>x.hidden=true);
-});
-
-function save(){
-  localStorage.setItem(KEY,JSON.stringify(data));
-  renderSchools();
-  updateStats();
-  scheduleSync();
-}
-function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+const KEY="listta_v2";
+const SEED_SCHOOLS=[
+"EM AGOSTINHO MOREIRA E SILVA","EM ALBA FROTA","EM ALDEÍDES RÉGIS","EM ANTÔNIO CORREIA LIMA","EM ANTÔNIO MENDES","EM CASIMIRO JOSÉ DE LIMA FILHO","EM CASTELO DE CASTRO","EM CRISTO REDENTOR","EM DOIS DE DEZEMBRO","EM DOM ANTÔNIO BATISTA DE FRAGOSO","EM DOM HELDER CÂMARA","EM FRANCISCO DOMINGOS DA SILVA","EM FRANCISCO EDILSON PINHEIRO","EM FRANCISCO SILVA CAVALCANTE","EM HERONDINA LIMA CAVALCANTE","EM HILBERTO SILVA","EM JADER DE FIGUEIREDO CORREIA","EM JESUS CRISTO","EM JOSÉ DE ALENCAR","EM LORHAN MARQUES MEDEIROS","EM MANOEL RODRIGUES","EM MARIA DALVA SEVERINO MARREIRO","EM MARIA MARIZA MENDES DE CARVALHO","EM MARIA ROSELI LIMA MESQUITA","EM MOURA BRASIL","EM NOSSA SENHORA APARECIDA","EM NOSSA SENHORA DO PERPÉTUO SOCORRO","EM PATATIVA DO ASSARÉ","EM PROFESSOR JOSÉ PARSIFAL BARROSO","EM PROFESSOR JOSÉ REBOUÇAS MACAMBIRA","EM QUINTINO CUNHA","EM RACHEL DE QUEIROZ","EM RAIMUNDO DE SOUSA MANGUEIRA","EM SANTA TEREZA","EM SÃO CURA D'ARS","EM SÃO RAFAEL","EM TERTULIANO CAMBRAIA","EM VIRGÍLIO TÁVORA","EM 11 DE AGOSTO","EM SECRETÁRIO PAULO PETROLA","EM REITOR PEDRO TEIXEIRA BARROSO","EM SEBASTIANA ALDIGUERI","EMT I ALDEMIR MARTINS","EMTI DEPUTADO ROBERTO MESQUITA","EMTI NOSSA SENHORA DE FÁTIMA"
+].map(s=>s.replace("EMT I","EMTI"));
+const STATUSES=[{key:"espera",label:"EM ESPERA",color:"#e98720"},{key:"atendido",label:"ATENDIDOS",color:"#16834a"},{key:"faltou",label:"FALTOU",color:"#c93434"}];
+let data=loadData(),currentSchoolId=null,currentShift="manha",supa=null,remoteBusy=false,installPrompt=null,dragId=null;
+const syncIds=loadSyncIds();
+function loadData(){try{const d=JSON.parse(localStorage.getItem(KEY)||"null");if(d&&Array.isArray(d.schools))return d}catch(e){}let old=null;try{old=JSON.parse(localStorage.getItem("listta_v1")||"null")}catch(e){}return{schools:SEED_SCHOOLS.map((name,i)=>({id:"seed-"+i,name,people:[]})).concat((old?.schools||[]).map(s=>({...s,id:String(s.id),name:String(s.name||"ESCOLA").toUpperCase(),people:(s.people||[]).map(p=>({...p,id:String(p.id),name:String(p.name||"").toUpperCase(),shift:p.shift||"manha",status:p.status==="atendido"?"atendido":p.status==="faltou"?"faltou":"espera",date:p.date||today()}))})).filter(s=>!SEED_SCHOOLS.includes(s.name)))}
+function loadSyncIds(){try{return JSON.parse(localStorage.getItem("listta_sync_ids")||'{"schools":{},"people":{}}')}catch(e){return{schools:{},people:{}}}}
+function persist(){localStorage.setItem(KEY,JSON.stringify(data))}
+function today(){const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-")}
+function fmtDate(d){if(!d)return"";const a=d.split("-");return a.length===3?a[2]+"/"+a[1]+"/"+a[0]:d}
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function toast(s){const el=document.getElementById("toast");el.textContent=s;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>el.hidden=true,2800)}
+function isAdmin(){return sessionStorage.getItem("listta_admin")==="yes"}
+function requireAdmin(){if(isAdmin())return true;toast("SOMENTE O ADM PODE ALTERAR OS DADOS.");return false}
+function save(){persist();renderSchools();updateStats();if(currentSchoolId)renderPeople();scheduleSync()}
+function getSchool(){return data.schools.find(s=>String(s.id)===String(currentSchoolId))}
 function showScreen(id,btn){document.querySelectorAll(".screen").forEach(x=>x.classList.remove("active"));document.getElementById(id).classList.add("active");document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));if(btn)btn.classList.add("active")}
-function goHome(){showScreen("home",document.querySelector(".nav"));currentSchool=null;currentShift=null}
-function openSchool(id){
-  const school=data.schools.find(s=>String(s.id)===String(id));
-  if(!school)return;
-  openModal("SELECIONE O TURNO",`<p class="modal-hint">${esc(school.name)}<br>ESCOLHA A LISTA QUE DESEJA ABRIR.</p><div class="form-actions"><button class="save" onclick="enterSchool(${school.id},'manha')">MANHÃ</button><button class="save" onclick="enterSchool(${school.id},'tarde')">TARDE</button></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button></div>`);
-}
-function enterSchool(id,shift){
-  currentSchool=data.schools.find(s=>String(s.id)===String(id));
-  if(!currentSchool)return;
-  currentShift=shift==="tarde"?"tarde":"manha";
-  closeModal();
-  document.getElementById("schoolTitle").textContent=currentSchool.name+" — "+(currentShift==="tarde"?"TARDE":"MANHÃ");
-  document.getElementById("personSearch").value="";
-  showScreen("school");
-  setTab("queue",document.querySelector(".tab"));
-  renderPeople();
-}
-function setTab(tab,btn){document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));if(btn)btn.classList.add("active");document.getElementById("queueTab").hidden=tab!=="queue";document.getElementById("reportTab").hidden=tab!=="report";if(tab==="report")renderSchoolReport()}
-function openModal(title,body){document.getElementById("modalTitle").textContent=title;document.getElementById("modalBody").innerHTML=body;document.getElementById("modal").hidden=false}
+function goHome(){currentSchoolId=null;showScreen("home",document.querySelector(".nav"));renderSchools()}
+function openModal(title,html){document.getElementById("modalTitle").textContent=title;document.getElementById("modalBody").innerHTML=html;document.getElementById("modal").hidden=false}
 function closeModal(){document.getElementById("modal").hidden=true}
-
-function openSchoolModal(){
-openModal("NOVA ESCOLA",`<div class="field"><label>NOME DA ESCOLA</label><input id="newSchool" placeholder="DIGITE O NOME DA ESCOLA"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="addSchool()">SALVAR</button></div>`);
-setTimeout(()=>document.getElementById("newSchool").focus(),50)
-}
-function addSchool(){let name=document.getElementById("newSchool").value.trim();if(!name)return alert("INFORME O NOME DA ESCOLA.");data.schools.push({id:Date.now(),name,people:[]});save();closeModal()}
-function renderSchools(){
-let q=(document.getElementById("schoolSearch")?.value||"").toUpperCase();let list=data.schools.filter(s=>s.name.includes(q));let el=document.getElementById("schoolList");
-el.innerHTML=list.length?list.map(s=>`<div class="school-card" onclick="openSchool(${s.id})"><div><h3>${esc(s.name)}</h3><p>${s.people.length} ATENDIMENTO(S)</p></div><span class="arrow">›</span></div>`).join(""):`<div class="empty">NENHUMA ESCOLA CADASTRADA.<br><br>TOQUE EM "NOVA ESCOLA" PARA COMEÇAR.</div>`;
-updateStats()
-}
-function openPersonModal(){
-let today=new Date().toISOString().split("T")[0];
-openModal("NOVO ATENDIMENTO",`<div class="field"><label>NOME</label><input id="personName" placeholder="NOME DA PESSOA"></div><div class="field"><label>OBSERVAÇÃO</label><textarea id="personNote" placeholder="OBSERVAÇÃO (OPCIONAL)"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="personDate" value="${today}"></div><div class="field"><label>TURNO DA LISTA</label><input value="${currentShift==="tarde"?"TARDE":"MANHÃ"}" disabled></div></div><div class="field"><label>MÉDICO</label><input id="personDoctor" placeholder="NOME DO MÉDICO"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="addPerson()">ADICIONAR</button></div>`);
-setTimeout(()=>document.getElementById("personName").focus(),50)
-}
-function openImportModal(){
-let today=new Date().toISOString().split("T")[0];
-openModal("IMPORTAR NOMES",`<p class="modal-hint">IMPORTE NOMES COLANDO-OS ABAIXO OU INFORMANDO O LINK DE UMA PLANILHA GOOGLE SHEETS PUBLICADA NA WEB COMO CSV. OS NOMES SERÃO CONVERTIDOS PARA MAIÚSCULAS E DUPLICADOS SERÃO IGNORADOS.</p><div class="field"><label>LINK DO GOOGLE SHEETS (OPCIONAL)</label><input id="sheetsUrl" type="url" placeholder="COLE AQUI O LINK DA PLANILHA"></div><div class="field"><label>OU COLE OS NOMES</label><textarea id="importNames" placeholder="JOÃO SILVA&#10;MARIA SANTOS&#10;PEDRO OLIVEIRA"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="importDate" value="${today}"></div><div class="field"><label>TURNO DA LISTA</label><input value="${currentShift==="tarde"?"TARDE":"MANHÃ"}" disabled></div></div><div class="field"><label>MÉDICO</label><input id="importDoctor" placeholder="NOME DO MÉDICO (OPCIONAL)"></div><p class="modal-hint">PARA IMPORTAR PELO LINK, A PLANILHA PRECISA ESTAR PUBLICADA NA WEB EM FORMATO CSV OU COM ACESSO PÚBLICO. PLANILHAS PRIVADAS EXIGEM AUTENTICAÇÃO.</p><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="doImport()">IMPORTAR</button></div>`);
-setTimeout(()=>document.getElementById("sheetsUrl").focus(),50)
-}
-function parseSheetCsv(text){
-  const rows=[];let row=[],cell="",quoted=false;
-  for(let i=0;i<text.length;i++){
-    const ch=text[i],next=text[i+1];
-    if(ch==='"'&&quoted&&next==='"'){cell+='"';i++}
-    else if(ch==='"'){quoted=!quoted}
-    else if(ch===","&&!quoted){row.push(cell);cell=""}
-    else if((ch==="\n"||ch==="\r")&&!quoted){if(ch==="\r"&&next==="\n")i++;row.push(cell);if(row.some(v=>v.trim()))rows.push(row);row=[];cell=""}
-    else cell+=ch;
-  }
-  row.push(cell);if(row.some(v=>v.trim()))rows.push(row);
-  return rows;
-}
-function googleSheetCsvUrl(raw){
-  let u;try{u=new URL(raw.trim())}catch(e){throw new Error("INFORME UM LINK VÁLIDO DO GOOGLE SHEETS.")}
-  if(!/(^|\.)docs\.google\.com$/.test(u.hostname)||!u.pathname.includes("/spreadsheets/"))throw new Error("O LINK PRECISA SER DE UMA PLANILHA DO GOOGLE SHEETS.");
-  if(u.pathname.includes("/spreadsheets/d/e/")&&u.pathname.includes("/pub")){
-    u.searchParams.set("output","csv");
-    return u.toString();
-  }
-  const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);if(!m||m[1]==="e")throw new Error("NÃO CONSEGUI IDENTIFICAR A PLANILHA. USE O LINK NORMAL DA PLANILHA OU O LINK PUBLICADO COMO CSV.");
-  const gid=u.searchParams.get("gid")||((u.hash.match(/gid=(\d+)/)||[])[1])||"0";
-  return "https://docs.google.com/spreadsheets/d/"+m[1]+"/export?format=csv&gid="+encodeURIComponent(gid);
-}
-async function doImport(){
-let raw=document.getElementById("importNames").value;
-let sheetUrl=document.getElementById("sheetsUrl")?.value.trim()||"";
-let date=document.getElementById("importDate").value||new Date().toISOString().split("T")[0];
-let shift=currentShift||"manha";
-let doctor=document.getElementById("importDoctor").value.trim().toUpperCase();
-let names=[];
-if(sheetUrl){
-  try{
-    const csvUrl=googleSheetCsvUrl(sheetUrl);
-    const response=await fetch(csvUrl);
-    if(!response.ok)throw new Error("A PLANILHA NÃO ESTÁ ACESSÍVEL. PUBLIQUE-A NA WEB COMO CSV OU HABILITE O ACESSO DE LEITURA.");
-    const csv=await response.text();
-    if(/<!doctype html|<html/i.test(csv.slice(0,300)))throw new Error("O GOOGLE NÃO RETORNOU CSV. VERIFIQUE SE A PLANILHA ESTÁ PUBLICADA NA WEB OU COM ACESSO PÚBLICO.");
-    const rows=parseSheetCsv(csv);
-    names=rows.map(r=>(r[0]||"").trim()).filter(Boolean);
-    if(names.length&&/^(NOME|NOME DO ALUNO|ALUNO|ALUNOS|ESTUDANTE)$/i.test(names[0]))names.shift();
-  }catch(e){return alert("NÃO FOI POSSÍVEL IMPORTAR A PLANILHA.\n\n"+(e.message||"VERIFIQUE O LINK E A PERMISSÃO DE ACESSO."))}
-}else{
-  names=raw.split(/[\n\r\t;]+/).map(n=>n.trim()).filter(n=>n.length>0);
-}
-names=names.map(n=>n.trim().toUpperCase()).filter(Boolean);
-if(!names.length)return alert("NENHUM NOME ENCONTRADO. COLE OS NOMES OU INFORME UM LINK DE PLANILHA VÁLIDO.");
-let existing=new Set(currentSchool.people.filter(p=>(p.shift||"manha")===shift).map(p=>p.name.toUpperCase()));
-let added=0,skipped=0;
-names.forEach(name=>{
-if(existing.has(name)){skipped++;return}
-let id=Date.now()+Math.floor(Math.random()*10000);
-currentSchool.people.push({id,name,note:"",status:"nao_chegou",date,shift,doctor,created:new Date().toISOString()});
-existing.add(name);
-added++;
-});
-save();closeModal();renderPeople();
-alert(`IMPORTAÇÃO CONCLUÍDA!\n\nADICIONADOS: ${added}\nDUPLICADOS IGNORADOS: ${skipped}`);
-}
-function doImport(){
-let raw=document.getElementById("importNames").value;
-let date=document.getElementById("importDate").value||new Date().toISOString().split("T")[0];
-let shift=currentShift||"manha";
-let doctor=document.getElementById("importDoctor").value.trim().toUpperCase();
-let names=raw.split(/[\n\r\t;]+/).map(n=>n.trim().toUpperCase()).filter(n=>n.length>0);
-if(!names.length)return alert("COLE PELO PELO MENOS UM NOME.");
-let existing=new Set(currentSchool.people.filter(p=>(p.shift||"manha")===shift).map(p=>p.name.toUpperCase()));
-let added=0,skipped=0;
-names.forEach(name=>{
-if(existing.has(name)){skipped++;return}
-let id=Date.now()+Math.floor(Math.random()*10000);
-currentSchool.people.push({id,name,note:"",status:"nao_chegou",date,shift,doctor,created:new Date().toISOString()});
-existing.add(name);
-added++;
-});
-save();closeModal();renderPeople();
-alert(`IMPORTAÇÃO CONCLUÍDA!\n\nADICIONADOS: ${added}\nDUPLICADOS IGNORADOS: ${skipped}`);
-}
-function addPerson(){
-let name=document.getElementById("personName").value.trim().toUpperCase();
-let note=document.getElementById("personNote").value.trim();
-let date=document.getElementById("personDate").value||new Date().toISOString().split("T")[0];
-let shift=currentShift||"manha";
-let doctor=document.getElementById("personDoctor").value.trim().toUpperCase();
-if(!name)return alert("INFORME O NOME.");
-currentSchool.people.push({id:Date.now(),name,note,status:"nao_chegou",date,shift,doctor,created:new Date().toISOString()});
-save();closeModal();renderPeople()
-}
-function setStatus(id,status){let p=currentSchool.people.find(x=>x.id===id);if(p){p.status=status;save();renderPeople()}}
-function toggleStatusMenu(id){
-let m=document.getElementById("menu-"+id);if(!m)return;
-let isOpen=!m.hidden;
-document.querySelectorAll(".status-menu").forEach(x=>x.hidden=true);
-m.hidden=isOpen;
-}
-function removePerson(id){if(confirm("EXCLUIR ESTE ATENDIMENTO?")){currentSchool.people=currentSchool.people.filter(x=>x.id!==id);save();renderPeople()}}
-function renderPeople(){
-let q=(document.getElementById("personSearch")?.value||"").toUpperCase();let arr=currentSchool.people.filter(p=>(p.shift||"manha")===currentShift&&p.name.includes(q));let el=document.getElementById("peopleList");
-el.innerHTML=arr.length?arr.map(p=>{
-let info=[p.doctor,p.shift==="tarde"?"TARDE":"MANHÃ",formatDate(p.date),p.note].filter(Boolean).join(" • ");
-return `<div class="person"><div class="person-main"><b>${esc(p.name)}</b><small>${esc(info)}</small></div><div class="person-actions"><button class="status-btn" style="background:${statusColor(p.status)}" onclick="toggleStatusMenu(${p.id})">${statusLabel(p.status)} ▾</button><div class="status-menu" id="menu-${p.id}" hidden>${STATUS_OPTS.map(o=>`<button class="status-opt" onclick="setStatus(${p.id},'${o.key}')">${o.label}</button>`).join("")}</div><button class="delete" onclick="removePerson(${p.id})">×</button></div></div>`;
-}).join(""):`<div class="empty">NENHUM ATENDIMENTO.<br><br>TOQUE EM "ATENDIMENTO" PARA ADICIONAR.</div>`;
-}
-function totals(){let all=data.schools.flatMap(s=>s.people);return {all,done:all.filter(p=>p.status==="atendido").length}}
-function updateStats(){let t=totals();document.getElementById("schoolCount").textContent=data.schools.length;document.getElementById("doneCount").textContent=t.done;let today=new Date().toISOString().split("T")[0];document.getElementById("todayCount").textContent=t.all.filter(p=>p.date===today).length}
-function groupPeople(people){
-let groups={};
-people.forEach(p=>{
-let key=(p.date||"")+"|"+(p.shift||"")+"|"+(p.doctor||"");
-if(!groups[key])groups[key]={date:p.date,shift:p.shift,doctor:p.doctor,people:[]};
-groups[key].people.push(p);
-});
-return Object.keys(groups).sort().map(k=>groups[k]);
-}
-function renderSchoolReport(){
-let people=currentSchool.people.filter(p=>(p.shift||"manha")===currentShift);
-let counts={};STATUS_OPTS.forEach(o=>counts[o.key]=people.filter(p=>p.status===o.key).length);
-let html=`<div class="report-box"><h3>${esc(currentSchool.name)} — ${currentShift==="tarde"?"TARDE":"MANHÃ"}</h3><div class="big">${people.length}</div><p>ATENDIMENTOS REGISTRADOS</p></div>`;
-html+=`<div class="report-box"><h3>STATUS</h3>${STATUS_OPTS.map(o=>`<p><span class="dot" style="background:${o.color}"></span>${o.label}: ${counts[o.key]}</p>`).join("")}</div>`;
-groupPeople(people).forEach(g=>{
-let label=`${formatDate(g.date)} • ${g.shift==="tarde"?"TARDE":"MANHÃ"}${g.doctor?" • "+esc(g.doctor):""}`;
-html+=`<div class="report-box"><h3>${esc(label)}</h3>${g.people.map((p,i)=>`<p>${i+1}. ${esc(p.name)} — ${statusLabel(p.status)}</p>`).join("")}</div>`;
-});
-document.getElementById("schoolReport").innerHTML=html||`<div class="empty">NENHUM REGISTRO.</div>`;
-}
-function renderGlobalReport(){
-let all=data.schools.flatMap(s=>s.people);
-let counts={};STATUS_OPTS.forEach(o=>counts[o.key]=all.filter(p=>p.status===o.key).length);
-let html=`<div class="report-box"><h3>TOTAL GERAL</h3><div class="big">${all.length}</div><p>ATENDIMENTOS</p></div>`;
-html+=`<div class="report-box"><h3>STATUS</h3>${STATUS_OPTS.map(o=>`<p><span class="dot" style="background:${o.color}"></span>${o.label}: ${counts[o.key]}</p>`).join("")}</div>`;
-data.schools.forEach(s=>{
-if(!s.people.length)return;
-groupPeople(s.people).forEach(g=>{
-let label=`${esc(s.name)} • ${formatDate(g.date)} • ${g.shift==="tarde"?"TARDE":"MANHÃ"}${g.doctor?" • "+esc(g.doctor):""}`;
-html+=`<div class="report-box"><h3>${esc(label)}</h3>${g.people.map((p,i)=>`<p>${i+1}. ${esc(p.name)} — ${statusLabel(p.status)}</p>`).join("")}</div>`;
-});
-});
-document.getElementById("globalReport").innerHTML=html;
-}
-function exportReport(){
-let all=data.schools.flatMap(s=>s.people);
-let lines=["LISTTA — RELATÓRIO GERAL","DATA: "+new Date().toLocaleDateString("PT-BR"),"","TOTAL DE ESCOLAS: "+data.schools.length,"TOTAL DE ATENDIMENTOS: "+all.length,""];
-STATUS_OPTS.forEach(o=>lines.push(`${o.label}: ${all.filter(p=>p.status===o.key).length}`));
-lines.push("");
-data.schools.forEach(s=>{
-if(!s.people.length)return;
-groupPeople(s.people).forEach(g=>{
-lines.push("ESCOLA: "+s.name);
-lines.push("DATA: "+formatDate(g.date)+" • TURNO: "+(g.shift==="tarde"?"TARDE":"MANHÃ")+(g.doctor?" • MÉDICO: "+g.doctor:""));
-g.people.forEach((p,i)=>lines.push(`${i+1}. ${p.name} — ${statusLabel(p.status)}${p.note?" — "+p.note:""}`));
-lines.push("");
-});
-});
-let blob=new Blob([lines.join("\n")],{type:"text/plain;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="RELATORIO-LISTTA.txt";a.click();URL.revokeObjectURL(a.href)
-}
-function renderOldReport(){
-let dateInput=document.getElementById("reportDate");
-let el=document.getElementById("oldReport");
-if(!el)return;
-if(!dateInput||!dateInput.value){el.innerHTML=`<div class="empty">SELECIONE UMA DATA PARA VISUALIZAR O RELATÓRIO.</div>`;return}
-let date=dateInput.value;
-let allForDate=data.schools.flatMap(s=>s.people.filter(p=>p.date===date).map(p=>({...p,schoolName:s.name})));
-if(!allForDate.length){el.innerHTML=`<div class="empty">NENHUM ATENDIMENTO ENCONTRADO EM ${formatDate(date)}.</div>`;return}
-let counts={};STATUS_OPTS.forEach(o=>counts[o.key]=allForDate.filter(p=>p.status===o.key).length);
-let html=`<div class="report-box"><h3>RELATÓRIO DE ${formatDate(date)}</h3><div class="big">${allForDate.length}</div><p>ATENDIMENTOS</p></div>`;
-html+=`<div class="report-box"><h3>STATUS</h3>${STATUS_OPTS.map(o=>`<p><span class="dot" style="background:${o.color}"></span>${o.label}: ${counts[o.key]}</p>`).join("")}</div>`;
-let groups={};
-allForDate.forEach(p=>{
-let key=(p.schoolName||"")+"|"+(p.shift||"")+"|"+(p.doctor||"");
-if(!groups[key])groups[key]={schoolName:p.schoolName,shift:p.shift,doctor:p.doctor,people:[]};
-groups[key].people.push(p);
-});
-Object.keys(groups).sort().forEach(k=>{
-let g=groups[k];
-let label=`${esc(g.schoolName)} • ${formatDate(date)} • ${g.shift==="tarde"?"TARDE":"MANHÃ"}${g.doctor?" • "+esc(g.doctor):""}`;
-html+=`<div class="report-box"><h3>${esc(label)}</h3>${g.people.map((p,i)=>`<p>${i+1}. ${esc(p.name)} — ${statusLabel(p.status)}</p>`).join("")}</div>`;
-});
-el.innerHTML=html;
-}
-function exportOldReport(){
-let dateInput=document.getElementById("reportDate");
-if(!dateInput||!dateInput.value)return alert("SELECIONE UMA DATA PRIMEIRO.");
-let date=dateInput.value;
-let allForDate=data.schools.flatMap(s=>s.people.filter(p=>p.date===date).map(p=>({...p,schoolName:s.name})));
-if(!allForDate.length)return alert("NENHUM ATENDIMENTO ENCONTRADO NESTA DATA.");
-let lines=["LISTTA — RELATÓRIO DE "+formatDate(date),"","","TOTAL DE ATENDIMENTOS: "+allForDate.length,""];
-STATUS_OPTS.forEach(o=>lines.push(`${o.label}: ${allForDate.filter(p=>p.status===o.key).length}`));
-lines.push("");
-let groups={};
-allForDate.forEach(p=>{
-let key=(p.schoolName||"")+"|"+(p.shift||"")+"|"+(p.doctor||"");
-if(!groups[key])groups[key]={schoolName:p.schoolName,shift:p.shift,doctor:p.doctor,people:[]};
-groups[key].people.push(p);
-});
-Object.keys(groups).sort().forEach(k=>{
-let g=groups[k];
-lines.push("ESCOLA: "+g.schoolName);
-lines.push("DATA: "+formatDate(date)+" • TURNO: "+(g.shift==="tarde"?"TARDE":"MANHÃ")+(g.doctor?" • MÉDICO: "+g.doctor:""));
-g.people.forEach((p,i)=>lines.push(`${i+1}. ${p.name} — ${statusLabel(p.status)}${p.note?" — "+p.note:""}`));
-lines.push("");
-});
-let fname="RELATORIO-LISTTA-"+date+".txt";
-let blob=new Blob([lines.join("\n")],{type:"text/plain;charset=utf-8"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fname;a.click();URL.revokeObjectURL(a.href)
-}
-
-function scheduleSync(){
-  if(!supa)return;
-  if(syncTimer)clearTimeout(syncTimer);
-  syncTimer=setTimeout(()=>doSync(),2000);
-}
-
-async function doSync(){
-  if(!supa||isSyncing)return;
-  if(!navigator.onLine){setSyncIndicator("offline");return}
-  isSyncing=true;
-  setSyncIndicator("syncing");
-  try{
-    let ids=getSyncIds();
-    // Enviar somente quando houve alteração local; sempre consultar o remoto,
-    // inclusive em dispositivos novos e após eventos de tempo real.
-    if(dataHash()!==lastSyncHash) await pushToRemote(ids);
-    await pullFromRemote(ids);
-    lastSyncHash=dataHash();
-    setSyncIndicator("online");
-  }catch(e){
-    console.warn("Sync error",e);
-    setSyncIndicator("offline");
-  }finally{
-    isSyncing=false;
-  }
-}
-
-async function pushToRemote(ids){
-  for(let s of data.schools){
-    let sid=String(s.id);
-    if(ids.schools[sid]){
-      const {error}=await supa.from("schools").update({
-        name:s.name,updated_at:new Date().toISOString(),deleted:false
-      }).eq("id",ids.schools[sid]);
-      if(error)throw error;
-    }else{
-      let{data:row,error}=await supa.from("schools").insert({
-        name:s.name,deleted:false,updated_at:new Date().toISOString()
-      }).select("id").maybeSingle();
-      if(error)throw error;
-      if(row)ids.schools[sid]=row.id;
-      else throw new Error("Não foi possível salvar a escola no servidor.");
-    }
-    for(let p of s.people){
-      let pid=String(p.id);
-      if(ids.people[pid]){
-        const {error}=await supa.from("people").update({
-          name:p.name,note:p.note||"",status:p.status,date:p.date,shift:p.shift,doctor:p.doctor||"",
-          updated_at:new Date().toISOString(),deleted:false
-        }).eq("id",ids.people[pid]);
-        if(error)throw error;
-      }else{
-        if(!ids.schools[sid])throw new Error("A escola ainda não foi sincronizada.");
-        let{data:row,error}=await supa.from("people").insert({
-          school_id:ids.schools[sid],name:p.name,note:p.note||"",status:p.status,date:p.date,shift:p.shift,doctor:p.doctor||"",deleted:false,updated_at:new Date().toISOString()
-        }).select("id").maybeSingle();
-        if(error)throw error;
-        if(row)ids.people[pid]=row.id;
-        else throw new Error("Não foi possível salvar o atendimento no servidor.");
-      }
-    }
-  }
-  saveSyncIds(ids);
-}
-
-async function pullFromRemote(ids){
-  let{data:remoteSchools,error:se}=await supa.from("schools").select("id,name,deleted,updated_at").eq("deleted",false);
-  if(se)throw se;
-  let remoteSchoolIds={};
-  let remotePeopleIds={};
-  (remoteSchools||[]).forEach(rs=>{
-    let localId=Object.keys(ids.schools).find(k=>String(ids.schools[k])===String(rs.id));
-    if(localId){
-      remoteSchoolIds[localId]=rs;
-      let school=data.schools.find(x=>String(x.id)===localId);
-      if(school&&rs.name&&school.name!==rs.name)school.name=rs.name;
-    }else{
-      // Uma escola criada em outro celular/computador precisa ser criada localmente
-      // e vinculada ao ID remoto para que seus alunos também sejam importados.
-      let existing=data.schools.find(x=>x.name.trim().toUpperCase()===String(rs.name||"").trim().toUpperCase());
-      if(existing){
-        localId=String(existing.id);
-      }else{
-        localId=String(Date.now()+Math.floor(Math.random()*100000));
-        data.schools.push({id:Number(localId),name:rs.name||"ESCOLA",people:[]});
-      }
-      ids.schools[localId]=rs.id;
-      remoteSchoolIds[localId]=rs;
-    }
-  });
-  let{data:remotePeople,error:pe}=await supa.from("people").select("id,school_id,name,note,status,date,shift,doctor,deleted,updated_at").eq("deleted",false);
-  if(pe)throw pe;
-  (remotePeople||[]).forEach(rp=>{
-    let schoolLocalId=Object.keys(ids.schools).find(k=>ids.schools[k]===rp.school_id);
-    if(!schoolLocalId)return;
-    let s=data.schools.find(x=>String(x.id)===schoolLocalId);
-    if(!s)return;
-    let localPid=Object.keys(ids.people).find(k=>ids.people[k]===rp.id);
-    if(localPid){
-      let p=s.people.find(x=>String(x.id)===localPid);
-      if(p){
-        p.name=rp.name;p.note=rp.note||"";p.status=rp.status;p.date=rp.date;p.shift=rp.shift;p.doctor=rp.doctor||"";
-      }
-      remotePeopleIds[localPid]=true;
-    }else{
-      let newId=Date.now()+Math.floor(Math.random()*1000);
-      ids.people[String(newId)]=rp.id;
-      s.people.push({id:newId,name:rp.name,note:rp.note||"",status:rp.status,date:rp.date,shift:rp.shift,doctor:rp.doctor||"",created:rp.created_at});
-      remotePeopleIds[String(newId)]=true;
-    }
-  });
-  saveSyncIds(ids);
-  localStorage.setItem(KEY,JSON.stringify(data));
-  lastSyncHash=dataHash();
-  renderSchools();
-  if(currentSchool)renderPeople();
-}
-
-window.addEventListener("online",()=>{setSyncIndicator("syncing");doSync()});
-window.addEventListener("offline",()=>setSyncIndicator("offline"));
-
-if(supa){
-  supa.channel("listta_changes")
-    .on("postgres_changes",{event:"*",schema:"public",table:"schools"},()=>{if(!isSyncing)doSync()})
-    .on("postgres_changes",{event:"*",schema:"public",table:"people"},()=>{if(!isSyncing)doSync()})
-    .subscribe();
-  if(navigator.onLine){setSyncIndicator("syncing");doSync()}
-}else{
-  setSyncIndicator("offline");
-}
-
-renderSchools();updateStats();
+function openSchoolModal(){if(!requireAdmin())return;openModal("NOVA ESCOLA",'<div class="field"><label>NOME DA ESCOLA</label><input id="newSchool" placeholder="DIGITE O NOME DA ESCOLA"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="addSchool()">SALVAR ESCOLA</button></div>')}
+function addSchool(){if(!requireAdmin())return;const name=document.getElementById("newSchool").value.trim().toUpperCase();if(!name)return toast("INFORME O NOME DA ESCOLA.");if(data.schools.some(s=>s.name===name))return toast("ESSA ESCOLA JÁ ESTÁ CADASTRADA.");data.schools.push({id:"local-"+Date.now(),name,people:[]});save();closeModal();toast("ESCOLA CADASTRADA.")}
+function openSchool(id){currentSchoolId=String(id);const s=getSchool();if(!s)return;openModal("SELECIONE O TURNO",'<p class="modal-hint">'+esc(s.name)+'<br>ESCOLHA A LISTA INDEPENDENTE QUE DESEJA ABRIR.</p><div class="form-actions"><button class="save" onclick="enterSchool(\'manha\')">MANHÃ</button><button class="save" onclick="enterSchool(\'tarde\')">TARDE</button></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button></div>')}
+function enterSchool(shift){currentShift=shift;closeModal();const s=getSchool();if(!s)return;document.getElementById("schoolTitle").textContent=s.name;document.getElementById("shiftLabel").textContent="TURNO: "+(shift==="tarde"?"TARDE":"MANHÃ");document.getElementById("personSearch").value="";document.getElementById("schoolReportDate").value=today();showScreen("school");setTab("queue",document.querySelector(".tab"));renderPeople()}
+function renderSchools(){const q=(document.getElementById("schoolSearch")?.value||"").toUpperCase().trim();const list=data.schools.filter(s=>s.name.includes(q));const el=document.getElementById("schoolList");el.innerHTML=list.length?list.map(s=>'<button class="school-card" onclick="openSchool(\''+esc(s.id)+'\')"><div><h3>'+esc(s.name)+'</h3><p>'+s.people.length+' ALUNO(S) REGISTRADO(S)</p><span class="school-tag">ABRIR MANHÃ / TARDE</span></div><span class="arrow">›</span></button>').join(""):'<div class="empty">NENHUMA ESCOLA ENCONTRADA.<br>USE A BUSCA OU CADASTRE UMA NOVA ESCOLA.</div>';updateStats()}
+function updateStats(){const all=data.schools.flatMap(s=>s.people);document.getElementById("schoolCount").textContent=data.schools.length;document.getElementById("todayCount").textContent=all.filter(p=>p.date===today()).length;document.getElementById("doneCount").textContent=all.filter(p=>p.status==="atendido").length}
+function setTab(tab,btn){document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));if(btn)btn.classList.add("active");document.getElementById("queueTab").hidden=tab!=="queue";document.getElementById("reportTab").hidden=tab!=="report";if(tab==="report")renderSchoolReport()}
+function openPersonModal(){if(!requireAdmin())return;openModal("ADICIONAR ALUNO",'<div class="field"><label>NOME DO ALUNO</label><input id="personName" placeholder="NOME COMPLETO"></div><div class="field"><label>OBSERVAÇÃO (OPCIONAL)</label><textarea id="personNote" placeholder="OBSERVAÇÃO"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="personDate" value="'+today()+'"></div><div class="field"><label>MÉDICO / RESPONSÁVEL</label><input id="personDoctor" placeholder="NOME (OPCIONAL)"></div></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="addPerson()">ADICIONAR</button></div>')}
+function addPerson(){if(!requireAdmin())return;const name=document.getElementById("personName").value.trim().toUpperCase();if(!name)return toast("INFORME O NOME DO ALUNO.");const s=getSchool();if(!s)return;const exists=s.people.some(p=>p.shift===currentShift&&p.date===(document.getElementById("personDate").value||today())&&p.name===name);if(exists)return toast("ESSE ALUNO JÁ ESTÁ NA LISTA DESTA DATA E TURNO.");s.people.push({id:"p-"+Date.now()+"-"+Math.random().toString(36).slice(2,6),name,note:document.getElementById("personNote").value.trim().toUpperCase(),status:"espera",date:document.getElementById("personDate").value||today(),shift:currentShift,doctor:document.getElementById("personDoctor").value.trim().toUpperCase(),created:new Date().toISOString(),star:false});save();closeModal();toast("ALUNO ADICIONADO.")}
+function openImportModal(){if(!requireAdmin())return;openModal("IMPORTAR NOMES DO GOOGLE SHEETS",'<p class="modal-hint">COLE OS NOMES OU COLE UM LINK DE UMA PLANILHA GOOGLE SHEETS COM ACESSO DE LEITURA. A IMPORTAÇÃO USA A PRIMEIRA COLUNA, CONVERTE PARA MAIÚSCULAS E IGNORA DUPLICADOS.</p><div class="field"><label>LINK DA PLANILHA (OPCIONAL)</label><input id="sheetsUrl" type="url" placeholder="LINK DO GOOGLE SHEETS"></div><div class="field"><label>OU COLE OS NOMES AQUI</label><textarea id="importNames" placeholder="UM ALUNO POR LINHA"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="importDate" value="'+today()+'"></div><div class="field"><label>MÉDICO / RESPONSÁVEL</label><input id="importDoctor" placeholder="OPCIONAL"></div></div><p class="hint">PLANILHAS PRIVADAS PODEM EXIGIR AUTENTICAÇÃO. PARA IMPORTAÇÃO POR LINK, PUBLIQUE COMO CSV OU PERMITA ACESSO DE LEITURA.</p><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="doImport()">IMPORTAR ALUNOS</button></div>')}
+function sheetCsvUrl(raw){let u;try{u=new URL(raw.trim())}catch(e){throw Error("LINK INVÁLIDO.")}if(!/(^|\.)docs\.google\.com$/.test(u.hostname)||!u.pathname.includes("/spreadsheets/"))throw Error("USE UM LINK DO GOOGLE SHEETS.");if(u.pathname.includes("/spreadsheets/d/e/")&&u.pathname.includes("/pub")){u.searchParams.set("output","csv");return u.toString()}const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);if(!m)throw Error("NÃO FOI POSSÍVEL IDENTIFICAR A PLANILHA.");const gid=u.searchParams.get("gid")||((u.hash.match(/gid=(\d+)/)||[])[1])||"0";return "https://docs.google.com/spreadsheets/d/"+m[1]+"/export?format=csv&gid="+encodeURIComponent(gid)}
+function parseCsv(text){const rows=[];let row=[],cell="",quote=false;for(let i=0;i<text.length;i++){const c=text[i],n=text[i+1];if(c==='"'&&quote&&n==='"'){cell+='"';i++}else if(c==='"')quote=!quote;else if(c===","&&!quote){row.push(cell);cell=""}else if((c==="\n"||c==="\r")&&!quote){if(c==="\r"&&n==="\n")i++;row.push(cell);if(row.some(x=>x.trim()))rows.push(row);row=[];cell=""}else cell+=c}row.push(cell);if(row.some(x=>x.trim()))rows.push(row);return rows}
+async function doImport(){if(!requireAdmin())return;const s=getSchool();if(!s)return;let names=(document.getElementById("importNames").value||"").split(/[\n\r\t;]+/).map(x=>x.trim()).filter(Boolean);const url=document.getElementById("sheetsUrl").value.trim();if(url){try{const res=await fetch(sheetCsvUrl(url));if(!res.ok)throw Error("A PLANILHA NÃO ESTÁ DISPONÍVEL. VERIFIQUE A PUBLICAÇÃO/PERMISSÃO.");const txt=await res.text();if(/<html|<!doctype/i.test(txt.slice(0,300)))throw Error("O GOOGLE NÃO RETORNOU CSV. PUBLIQUE A PLANILHA OU HABILITE ACESSO DE LEITURA.");names=parseCsv(txt).map(r=>(r[0]||"").trim()).filter(Boolean);if(names.length&&/^(NOME|NOME DO ALUNO|ALUNO|ALUNOS|ESTUDANTE)$/i.test(names[0]))names.shift()}catch(e){return toast(e.message||"FALHA AO LER A PLANILHA.")}}names=names.map(x=>x.toUpperCase().trim()).filter(Boolean);if(!names.length)return toast("NENHUM NOME ENCONTRADO.");const date=document.getElementById("importDate").value||today(),doctor=document.getElementById("importDoctor").value.trim().toUpperCase();const existing=new Set(s.people.filter(p=>p.shift===currentShift&&p.date===date).map(p=>p.name));let added=0,skipped=0;for(const name of names){if(existing.has(name)){skipped++;continue}existing.add(name);s.people.push({id:"p-"+Date.now()+"-"+Math.random().toString(36).slice(2,8),name,note:"",status:"espera",date,shift:currentShift,doctor,created:new Date().toISOString(),star:false});added++}save();closeModal();toast("IMPORTAÇÃO CONCLUÍDA: "+added+" ADICIONADOS, "+skipped+" DUPLICADOS IGNORADOS.")}
+function setStatus(id,status){if(!requireAdmin())return;const s=getSchool(),p=s?.people.find(x=>String(x.id)===String(id));if(!p)return;p.status=status;save();toast("STATUS ATUALIZADO.")}
+function toggleStar(id){if(!requireAdmin())return;const p=getSchool()?.people.find(x=>String(x.id)===String(id));if(!p)return;p.star=!p.star;save()}
+function removePerson(id){if(!requireAdmin())return;if(!confirm("EXCLUIR ESTE ALUNO DA LISTA?"))return;const s=getSchool();s.people=s.people.filter(p=>String(p.id)!==String(id));save();toast("ALUNO REMOVIDO.")}
+function toggleStatusMenu(id){const el=document.getElementById("menu-"+CSS.escape(String(id)));if(!el)return;const open=!el.hidden;document.querySelectorAll(".status-menu").forEach(x=>x.hidden=true);el.hidden=open}
+document.addEventListener("click",e=>{if(!e.target.closest(".person-actions"))document.querySelectorAll(".status-menu").forEach(x=>x.hidden=true)});
+function renderPeople(){const s=getSchool();if(!s)return;const q=(document.getElementById("personSearch").value||"").toUpperCase().trim();const arr=s.people.filter(p=>(p.shift||"manha")===currentShift&&p.name.includes(q)).sort((a,b)=>(a.order??0)-(b.order??0));const el=document.getElementById("peopleList");el.innerHTML=arr.length?arr.map((p,i)=>{const st=STATUSES.find(x=>x.key===p.status)||STATUSES[0],info=[p.doctor,fmtDate(p.date),p.note].filter(Boolean).join(" • ");return '<div class="person" draggable="'+(isAdmin()?'true':'false')+'" ondragstart="dragStart(\''+esc(p.id)+'\')" ondragover="event.preventDefault()" ondrop="dropPerson(\''+esc(p.id)+'\')"><span class="drag">☷</span><div class="person-main"><b>'+esc(p.name)+'</b><small>'+esc(info||"SEM OBSERVAÇÕES")+'</small></div>'+(p.star?'<span class="star">★</span>':'')+'<div class="person-actions"><button class="status-btn" style="background:'+st.color+'" onclick="toggleStatusMenu(\''+esc(p.id)+'\')">'+st.label+' ▾</button><div class="status-menu" id="menu-'+esc(p.id)+'" hidden>'+STATUSES.map(o=>'<button class="status-opt" onclick="setStatus(\''+esc(p.id)+'\',\''+o.key+'\')">'+o.label+'</button>').join("")+'</div><button class="delete" title="MARCAR PRESENTE/DESTAQUE" onclick="toggleStar(\''+esc(p.id)+'\')">★</button><button class="delete" onclick="removePerson(\''+esc(p.id)+'\')">×</button></div></div>'}).join(""):'<div class="empty">NENHUM ALUNO NESTA LISTA.<br>USE ADICIONAR ALUNO OU IMPORTAR NOMES.</div>'}
+function dragStart(id){if(!isAdmin())return;dragId=id}
+function dropPerson(target){if(!isAdmin()||!dragId||dragId===target)return;const s=getSchool(),list=s.people.filter(p=>p.shift===currentShift),from=list.findIndex(p=>String(p.id)===String(dragId)),to=list.findIndex(p=>String(p.id)===String(target));if(from<0||to<0)return;const [item]=list.splice(from,1);list.splice(to,0,item);list.forEach((p,i)=>p.order=i);dragId=null;save()}
+function clearQueue(){if(!requireAdmin())return;if(!confirm("LIMPAR TODOS OS ALUNOS DESTE TURNO? ESTA AÇÃO NÃO PODE SER DESFEITA."))return;const s=getSchool();s.people=s.people.filter(p=>p.shift!==currentShift);save();toast("FILA LIMPA.")}
+function filteredByDate(people,date){return people.filter(p=>p.date===date)}
+function statusCounts(people){return STATUSES.map(o=>({...o,count:people.filter(p=>p.status===o.key).length}))}
+function renderSchoolReport(){const s=getSchool();if(!s)return;const date=document.getElementById("schoolReportDate").value||today();const people=s.people.filter(p=>p.shift===currentShift&&p.date===date);document.getElementById("schoolReport").innerHTML='<div class="report-box"><h3>'+esc(s.name)+' — '+(currentShift==="tarde"?"TARDE":"MANHÃ")+'</h3><div class="big">'+people.length+'</div><p>ALUNOS REGISTRADOS EM '+fmtDate(date)+'</p>'+statusCounts(people).map(x=>'<p>'+x.label+': <b>'+x.count+'</b></p>').join("")+'</div><div class="report-box"><h3>LISTA DE ALUNOS</h3>'+(people.length?people.map((p,i)=>'<p>'+(i+1)+'. '+esc(p.name)+' — '+(STATUSES.find(x=>x.key===p.status)?.label||"EM ESPERA")+(p.star?' ★':'')+'</p>').join(""):'<p>NENHUM REGISTRO PARA ESTA DATA E TURNO.</p>')+'</div>'}
+function renderGlobalReport(){const all=data.schools.flatMap(s=>s.people.map(p=>({...p,schoolName:s.name})));document.getElementById("globalReport").innerHTML='<div class="report-box"><h3>RESUMO GERAL</h3><div class="big">'+all.length+'</div><p>ALUNOS REGISTRADOS</p><p>ESCOLAS COM REGISTROS: '+data.schools.filter(s=>s.people.length).length+'</p>'+statusCounts(all).map(x=>'<p>'+x.label+': <b>'+x.count+'</b></p>').join("")+'</div>'+data.schools.filter(s=>s.people.length).map(s=>'<div class="report-box"><h3>'+esc(s.name)+'</h3>'+["manha","tarde"].map(sh=>{const ps=s.people.filter(p=>p.shift===sh);return ps.length?'<p><b>'+(sh==="tarde"?"TARDE":"MANHÃ")+'</b> — '+ps.length+' ALUNO(S), '+ps.filter(p=>p.status==="atendido").length+' ATENDIDO(S)</p>':''}).join("")+'</div>').join("")}
+function renderOldReport(){const date=document.getElementById("reportDate").value||today(),all=data.schools.flatMap(s=>s.people.filter(p=>p.date===date).map(p=>({...p,schoolName:s.name})));document.getElementById("oldReport").innerHTML='<div class="report-box"><h3>RELATÓRIO DE '+fmtDate(date)+'</h3><div class="big">'+all.length+'</div><p>ALUNOS REGISTRADOS</p>'+statusCounts(all).map(x=>'<p>'+x.label+': <b>'+x.count+'</b></p>').join("")+'</div>'+data.schools.map(s=>{const ps=s.people.filter(p=>p.date===date);return ps.length?'<div class="report-box"><h3>'+esc(s.name)+'</h3>'+["manha","tarde"].map(sh=>{const group=ps.filter(p=>p.shift===sh);return group.length?'<p><b>'+(sh==="tarde"?"TARDE":"MANHÃ")+'</b></p>'+group.map((p,i)=>'<p>'+(i+1)+'. '+esc(p.name)+' — '+(STATUSES.find(x=>x.key===p.status)?.label||"EM ESPERA")+'</p>').join(""):''}).join("")+'</div>':''}).join("")}
+function printReport(id){const el=document.getElementById(id);if(!el)return;const old=document.title;document.title="LISTTA-RELATORIO-"+today();document.querySelectorAll(".screen").forEach(s=>s.dataset.printActive=s.classList.contains("active")?"1":"0");if(id==="schoolReport")document.getElementById("reportTab").hidden=false;window.print();document.title=old}
+function adminLogin(){const pin=document.getElementById("adminPin").value;const saved=localStorage.getItem("listta_admin_pin")||"1234";if(pin!==saved)return toast("PIN INCORRETO. PIN INICIAL: 1234.");sessionStorage.setItem("listta_admin","yes");document.getElementById("adminState").textContent="MODO ADM ATIVO NESTE DISPOSITIVO";toast("MODO ADM ATIVADO.");renderPeople()}
+function adminLogout(){sessionStorage.removeItem("listta_admin");document.getElementById("adminState").textContent="MODO DE VISUALIZAÇÃO";toast("MODO DE VISUALIZAÇÃO ATIVADO.");renderPeople()}
+function initSync(){try{if(window.supabase&&window.SUPABASE_URL&&window.SUPABASE_ANON_KEY){supa=window.supabase.createClient(window.SUPABASE_URL,window.SUPABASE_ANON_KEY,{realtime:{params:{eventsPerSecond:10}}});supa.channel("listta-realtime-v2").on("postgres_changes",{event:"*",schema:"public",table:"schools"},()=>pullRemote()).on("postgres_changes",{event:"*",schema:"public",table:"people"},()=>pullRemote()).subscribe();pullRemote()}}catch(e){console.warn(e);setSync("offline")}}
+function setSync(state){document.getElementById("syncIndicator").className="sync-dot "+state;document.getElementById("syncLabel").textContent=state==="online"?"SINCRONIZADO":state==="syncing"?"SINCRONIZANDO":"OFFLINE"}
+let syncTimer;function scheduleSync(){if(!supa)return;clearTimeout(syncTimer);syncTimer=setTimeout(pushRemote,1500)}
+async function pushRemote(){if(!supa||remoteBusy||!navigator.onLine)return;remoteBusy=true;setSync("syncing");try{for(const s of data.schools){let remoteId=syncIds.schools[String(s.id)];if(!remoteId){const {data:rows,error}=await supa.from("schools").select("id,name").eq("name",s.name).eq("deleted",false).limit(1);if(error)throw error;if(rows?.length)remoteId=rows[0].id;else{const r=await supa.from("schools").insert({name:s.name,deleted:false}).select("id").single();if(r.error)throw r.error;remoteId=r.data.id}syncIds.schools[String(s.id)]=remoteId}else{const r=await supa.from("schools").update({name:s.name,updated_at:new Date().toISOString(),deleted:false}).eq("id",remoteId);if(r.error)throw r.error}for(const p of s.people){let pid=syncIds.people[String(p.id)];const row={school_id:remoteId,name:p.name,note:p.note||"",status:p.status==="espera"?"nao_chegou":p.status,date:p.date||today(),shift:p.shift||"manha",doctor:p.doctor||"",deleted:false,updated_at:new Date().toISOString()};if(pid){const r=await supa.from("people").update(row).eq("id",pid);if(r.error)throw r.error}else{const r=await supa.from("people").insert(row).select("id").single();if(r.error)throw r.error;syncIds.people[String(p.id)]=r.data.id}}}localStorage.setItem("listta_sync_ids",JSON.stringify(syncIds));setSync("online")}catch(e){console.warn("LISTTA SYNC",e);setSync("offline")}finally{remoteBusy=false}}
+async function pullRemote(){if(!supa||remoteBusy||!navigator.onLine)return;remoteBusy=true;setSync("syncing");try{const a=await supa.from("schools").select("id,name,deleted").eq("deleted",false);if(a.error)throw a.error;const b=await supa.from("people").select("id,school_id,name,note,status,date,shift,doctor,deleted,created_at").eq("deleted",false);if(b.error)throw b.error;for(const rs of a.data||[]){let local=Object.keys(syncIds.schools).find(k=>syncIds.schools[k]===rs.id),s=local&&data.schools.find(x=>String(x.id)===local);if(!s){s=data.schools.find(x=>x.name===rs.name);if(!s){s={id:"remote-"+rs.id,name:rs.name,people:[]};data.schools.push(s)}syncIds.schools[String(s.id)]=rs.id}const people=(b.data||[]).filter(p=>p.school_id===rs.id);for(const rp of people){let localPid=Object.keys(syncIds.people).find(k=>syncIds.people[k]===rp.id),p=localPid&&s.people.find(x=>String(x.id)===localPid);if(!p){p=s.people.find(x=>x.name===rp.name&&x.date===rp.date&&x.shift===rp.shift);if(!p){p={id:"remote-p-"+rp.id,name:rp.name};s.people.push(p)}syncIds.people[String(p.id)]=rp.id}Object.assign(p,{name:rp.name,note:rp.note||"",status:rp.status==="nao_chegou"?"espera":rp.status,date:rp.date||today(),shift:rp.shift||"manha",doctor:rp.doctor||""})}}persist();localStorage.setItem("listta_sync_ids",JSON.stringify(syncIds));renderSchools();if(currentSchoolId)renderPeople();setSync("online")}catch(e){console.warn("LISTTA PULL",e);setSync("offline")}finally{remoteBusy=false}}
+window.addEventListener("online",()=>pullRemote());window.addEventListener("offline",()=>setSync("offline"));window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();installPrompt=e;document.getElementById("installBtn").hidden=false});document.getElementById("installBtn").onclick=async()=>{if(installPrompt){installPrompt.prompt();installPrompt=null}};
+document.getElementById("reportDate").value=today();document.getElementById("schoolReportDate").value=today();renderSchools();updateStats();renderOldReport();initSync();
