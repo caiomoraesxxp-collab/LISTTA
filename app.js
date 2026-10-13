@@ -1,6 +1,7 @@
 const KEY="listta_v1";
 let data=JSON.parse(localStorage.getItem(KEY)||'null')||{schools:[]};
 let currentSchool=null;
+let currentShift=null;
 let deferredPrompt=null;
 let supa=null;
 let syncTimer=null;
@@ -70,8 +71,23 @@ function save(){
 }
 function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 function showScreen(id,btn){document.querySelectorAll(".screen").forEach(x=>x.classList.remove("active"));document.getElementById(id).classList.add("active");document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));if(btn)btn.classList.add("active")}
-function goHome(){showScreen("home",document.querySelector(".nav"));currentSchool=null}
-function openSchool(id){currentSchool=data.schools.find(s=>s.id===id);document.getElementById("schoolTitle").textContent=currentSchool.name;document.getElementById("personSearch").value="";showScreen("school");setTab("queue",document.querySelector(".tab"));renderPeople()}
+function goHome(){showScreen("home",document.querySelector(".nav"));currentSchool=null;currentShift=null}
+function openSchool(id){
+  const school=data.schools.find(s=>String(s.id)===String(id));
+  if(!school)return;
+  openModal("SELECIONE O TURNO",`<p class="modal-hint">${esc(school.name)}<br>ESCOLHA A LISTA QUE DESEJA ABRIR.</p><div class="form-actions"><button class="save" onclick="enterSchool(${school.id},'manha')">MANHÃ</button><button class="save" onclick="enterSchool(${school.id},'tarde')">TARDE</button></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button></div>`);
+}
+function enterSchool(id,shift){
+  currentSchool=data.schools.find(s=>String(s.id)===String(id));
+  if(!currentSchool)return;
+  currentShift=shift==="tarde"?"tarde":"manha";
+  closeModal();
+  document.getElementById("schoolTitle").textContent=currentSchool.name+" — "+(currentShift==="tarde"?"TARDE":"MANHÃ");
+  document.getElementById("personSearch").value="";
+  showScreen("school");
+  setTab("queue",document.querySelector(".tab"));
+  renderPeople();
+}
 function setTab(tab,btn){document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));if(btn)btn.classList.add("active");document.getElementById("queueTab").hidden=tab!=="queue";document.getElementById("reportTab").hidden=tab!=="report";if(tab==="report")renderSchoolReport()}
 function openModal(title,body){document.getElementById("modalTitle").textContent=title;document.getElementById("modalBody").innerHTML=body;document.getElementById("modal").hidden=false}
 function closeModal(){document.getElementById("modal").hidden=true}
@@ -88,22 +104,22 @@ updateStats()
 }
 function openPersonModal(){
 let today=new Date().toISOString().split("T")[0];
-openModal("NOVO ATENDIMENTO",`<div class="field"><label>NOME</label><input id="personName" placeholder="NOME DA PESSOA"></div><div class="field"><label>OBSERVAÇÃO</label><textarea id="personNote" placeholder="OBSERVAÇÃO (OPCIONAL)"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="personDate" value="${today}"></div><div class="field"><label>TURNO</label><select id="personShift"><option value="manha">MANHÃ</option><option value="tarde">TARDE</option></select></div></div><div class="field"><label>MÉDICO</label><input id="personDoctor" placeholder="NOME DO MÉDICO"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="addPerson()">ADICIONAR</button></div>`);
+openModal("NOVO ATENDIMENTO",`<div class="field"><label>NOME</label><input id="personName" placeholder="NOME DA PESSOA"></div><div class="field"><label>OBSERVAÇÃO</label><textarea id="personNote" placeholder="OBSERVAÇÃO (OPCIONAL)"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="personDate" value="${today}"></div><div class="field"><label>TURNO DA LISTA</label><input value="${currentShift==="tarde"?"TARDE":"MANHÃ"}" disabled></div></div><div class="field"><label>MÉDICO</label><input id="personDoctor" placeholder="NOME DO MÉDICO"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="addPerson()">ADICIONAR</button></div>`);
 setTimeout(()=>document.getElementById("personName").focus(),50)
 }
 function openImportModal(){
 let today=new Date().toISOString().split("T")[0];
-openModal("IMPORTAR NOMES",`<p class="modal-hint">COLE A LISTA DE NOMES DA PLANILHA (UM NOME POR LINHA). OS NOMES SERÃO CONVERTIDOS PARA MAIÚSCULAS E OS DUPLICADOS SERÃO IGNORADOS.</p><div class="field"><label>NOMES</label><textarea id="importNames" placeholder="JOÃO SILVA&#10;MARIA SANTOS&#10;PEDRO OLIVEIRA"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="importDate" value="${today}"></div><div class="field"><label>TURNO</label><select id="importShift"><option value="manha">MANHÃ</option><option value="tarde">TARDE</option></select></div></div><div class="field"><label>MÉDICO</label><input id="importDoctor" placeholder="NOME DO MÉDICO (OPCIONAL)"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="doImport()">IMPORTAR</button></div>`);
+openModal("IMPORTAR NOMES",`<p class="modal-hint">COLE A LISTA DE NOMES DA PLANILHA (UM NOME POR LINHA). OS NOMES SERÃO CONVERTIDOS PARA MAIÚSCULAS E OS DUPLICADOS SERÃO IGNORADOS.</p><div class="field"><label>NOMES</label><textarea id="importNames" placeholder="JOÃO SILVA&#10;MARIA SANTOS&#10;PEDRO OLIVEIRA"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="importDate" value="${today}"></div><div class="field"><label>TURNO DA LISTA</label><input value="${currentShift==="tarde"?"TARDE":"MANHÃ"}" disabled></div></div><div class="field"><label>MÉDICO</label><input id="importDoctor" placeholder="NOME DO MÉDICO (OPCIONAL)"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="doImport()">IMPORTAR</button></div>`);
 setTimeout(()=>document.getElementById("importNames").focus(),50)
 }
 function doImport(){
 let raw=document.getElementById("importNames").value;
 let date=document.getElementById("importDate").value||new Date().toISOString().split("T")[0];
-let shift=document.getElementById("importShift").value;
+let shift=currentShift||"manha";
 let doctor=document.getElementById("importDoctor").value.trim().toUpperCase();
 let names=raw.split(/[\n\r\t;]+/).map(n=>n.trim().toUpperCase()).filter(n=>n.length>0);
 if(!names.length)return alert("COLE PELO PELO MENOS UM NOME.");
-let existing=new Set(currentSchool.people.map(p=>p.name.toUpperCase()));
+let existing=new Set(currentSchool.people.filter(p=>(p.shift||"manha")===shift).map(p=>p.name.toUpperCase()));
 let added=0,skipped=0;
 names.forEach(name=>{
 if(existing.has(name)){skipped++;return}
@@ -119,7 +135,7 @@ function addPerson(){
 let name=document.getElementById("personName").value.trim().toUpperCase();
 let note=document.getElementById("personNote").value.trim();
 let date=document.getElementById("personDate").value||new Date().toISOString().split("T")[0];
-let shift=document.getElementById("personShift").value;
+let shift=currentShift||"manha";
 let doctor=document.getElementById("personDoctor").value.trim().toUpperCase();
 if(!name)return alert("INFORME O NOME.");
 currentSchool.people.push({id:Date.now(),name,note,status:"nao_chegou",date,shift,doctor,created:new Date().toISOString()});
@@ -134,7 +150,7 @@ m.hidden=isOpen;
 }
 function removePerson(id){if(confirm("EXCLUIR ESTE ATENDIMENTO?")){currentSchool.people=currentSchool.people.filter(x=>x.id!==id);save();renderPeople()}}
 function renderPeople(){
-let q=(document.getElementById("personSearch")?.value||"").toUpperCase();let arr=currentSchool.people.filter(p=>p.name.includes(q));let el=document.getElementById("peopleList");
+let q=(document.getElementById("personSearch")?.value||"").toUpperCase();let arr=currentSchool.people.filter(p=>(p.shift||"manha")===currentShift&&p.name.includes(q));let el=document.getElementById("peopleList");
 el.innerHTML=arr.length?arr.map(p=>{
 let info=[p.doctor,p.shift==="tarde"?"TARDE":"MANHÃ",formatDate(p.date),p.note].filter(Boolean).join(" • ");
 return `<div class="person"><div class="person-main"><b>${esc(p.name)}</b><small>${esc(info)}</small></div><div class="person-actions"><button class="status-btn" style="background:${statusColor(p.status)}" onclick="toggleStatusMenu(${p.id})">${statusLabel(p.status)} ▾</button><div class="status-menu" id="menu-${p.id}" hidden>${STATUS_OPTS.map(o=>`<button class="status-opt" onclick="setStatus(${p.id},'${o.key}')">${o.label}</button>`).join("")}</div><button class="delete" onclick="removePerson(${p.id})">×</button></div></div>`;
@@ -152,9 +168,9 @@ groups[key].people.push(p);
 return Object.keys(groups).sort().map(k=>groups[k]);
 }
 function renderSchoolReport(){
-let people=currentSchool.people;
+let people=currentSchool.people.filter(p=>(p.shift||"manha")===currentShift);
 let counts={};STATUS_OPTS.forEach(o=>counts[o.key]=people.filter(p=>p.status===o.key).length);
-let html=`<div class="report-box"><h3>${esc(currentSchool.name)}</h3><div class="big">${people.length}</div><p>ATENDIMENTOS REGISTRADOS</p></div>`;
+let html=`<div class="report-box"><h3>${esc(currentSchool.name)} — ${currentShift==="tarde"?"TARDE":"MANHÃ"}</h3><div class="big">${people.length}</div><p>ATENDIMENTOS REGISTRADOS</p></div>`;
 html+=`<div class="report-box"><h3>STATUS</h3>${STATUS_OPTS.map(o=>`<p><span class="dot" style="background:${o.color}"></span>${o.label}: ${counts[o.key]}</p>`).join("")}</div>`;
 groupPeople(people).forEach(g=>{
 let label=`${formatDate(g.date)} • ${g.shift==="tarde"?"TARDE":"MANHÃ"}${g.doctor?" • "+esc(g.doctor):""}`;
