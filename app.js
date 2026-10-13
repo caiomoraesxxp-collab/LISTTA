@@ -109,8 +109,63 @@ setTimeout(()=>document.getElementById("personName").focus(),50)
 }
 function openImportModal(){
 let today=new Date().toISOString().split("T")[0];
-openModal("IMPORTAR NOMES",`<p class="modal-hint">COLE A LISTA DE NOMES DA PLANILHA (UM NOME POR LINHA). OS NOMES SERÃO CONVERTIDOS PARA MAIÚSCULAS E OS DUPLICADOS SERÃO IGNORADOS.</p><div class="field"><label>NOMES</label><textarea id="importNames" placeholder="JOÃO SILVA&#10;MARIA SANTOS&#10;PEDRO OLIVEIRA"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="importDate" value="${today}"></div><div class="field"><label>TURNO DA LISTA</label><input value="${currentShift==="tarde"?"TARDE":"MANHÃ"}" disabled></div></div><div class="field"><label>MÉDICO</label><input id="importDoctor" placeholder="NOME DO MÉDICO (OPCIONAL)"></div><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="doImport()">IMPORTAR</button></div>`);
-setTimeout(()=>document.getElementById("importNames").focus(),50)
+openModal("IMPORTAR NOMES",`<p class="modal-hint">IMPORTE NOMES COLANDO-OS ABAIXO OU INFORMANDO O LINK DE UMA PLANILHA GOOGLE SHEETS PUBLICADA NA WEB COMO CSV. OS NOMES SERÃO CONVERTIDOS PARA MAIÚSCULAS E DUPLICADOS SERÃO IGNORADOS.</p><div class="field"><label>LINK DO GOOGLE SHEETS (OPCIONAL)</label><input id="sheetsUrl" type="url" placeholder="COLE AQUI O LINK DA PLANILHA"></div><div class="field"><label>OU COLE OS NOMES</label><textarea id="importNames" placeholder="JOÃO SILVA&#10;MARIA SANTOS&#10;PEDRO OLIVEIRA"></textarea></div><div class="field-row"><div class="field"><label>DATA</label><input type="date" id="importDate" value="${today}"></div><div class="field"><label>TURNO DA LISTA</label><input value="${currentShift==="tarde"?"TARDE":"MANHÃ"}" disabled></div></div><div class="field"><label>MÉDICO</label><input id="importDoctor" placeholder="NOME DO MÉDICO (OPCIONAL)"></div><p class="modal-hint">PARA IMPORTAR PELO LINK, A PLANILHA PRECISA ESTAR PUBLICADA NA WEB EM FORMATO CSV OU COM ACESSO PÚBLICO. PLANILHAS PRIVADAS EXIGEM AUTENTICAÇÃO.</p><div class="form-actions"><button class="cancel" onclick="closeModal()">CANCELAR</button><button class="save" onclick="doImport()">IMPORTAR</button></div>`);
+setTimeout(()=>document.getElementById("sheetsUrl").focus(),50)
+}
+function parseSheetCsv(text){
+  const rows=[];let row=[],cell="",quoted=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i],next=text[i+1];
+    if(ch==='"'&&quoted&&next==='"'){cell+='"';i++}
+    else if(ch==='"'){quoted=!quoted}
+    else if(ch===","&&!quoted){row.push(cell);cell=""}
+    else if((ch==="\n"||ch==="\r")&&!quoted){if(ch==="\r"&&next==="\n")i++;row.push(cell);if(row.some(v=>v.trim()))rows.push(row);row=[];cell=""}
+    else cell+=ch;
+  }
+  row.push(cell);if(row.some(v=>v.trim()))rows.push(row);
+  return rows;
+}
+function googleSheetCsvUrl(raw){
+  let u;try{u=new URL(raw.trim())}catch(e){throw new Error("INFORME UM LINK VÁLIDO DO GOOGLE SHEETS.")}
+  if(!/(^|\.)docs\.google\.com$/.test(u.hostname)||!u.pathname.includes("/spreadsheets/d/"))throw new Error("O LINK PRECISA SER DE UMA PLANILHA DO GOOGLE SHEETS.");
+  const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);if(!m)throw new Error("NÃO CONSEGUI IDENTIFICAR A PLANILHA NO LINK.");
+  const gid=u.searchParams.get("gid")||((u.hash.match(/gid=(\d+)/)||[])[1])||"0";
+  return "https://docs.google.com/spreadsheets/d/"+m[1]+"/export?format=csv&gid="+encodeURIComponent(gid);
+}
+async function doImport(){
+let raw=document.getElementById("importNames").value;
+let sheetUrl=document.getElementById("sheetsUrl")?.value.trim()||"";
+let date=document.getElementById("importDate").value||new Date().toISOString().split("T")[0];
+let shift=currentShift||"manha";
+let doctor=document.getElementById("importDoctor").value.trim().toUpperCase();
+let names=[];
+if(sheetUrl){
+  try{
+    const csvUrl=googleSheetCsvUrl(sheetUrl);
+    const response=await fetch(csvUrl);
+    if(!response.ok)throw new Error("A PLANILHA NÃO ESTÁ ACESSÍVEL. PUBLIQUE-A NA WEB COMO CSV OU HABILITE O ACESSO DE LEITURA.");
+    const csv=await response.text();
+    if(/<!doctype html|<html/i.test(csv.slice(0,300)))throw new Error("O GOOGLE NÃO RETORNOU CSV. VERIFIQUE SE A PLANILHA ESTÁ PUBLICADA NA WEB OU COM ACESSO PÚBLICO.");
+    const rows=parseSheetCsv(csv);
+    names=rows.map(r=>(r[0]||"").trim()).filter(Boolean);
+    if(names.length&&/^(NOME|NOME DO ALUNO|ALUNO|ALUNOS|ESTUDANTE)$/i.test(names[0]))names.shift();
+  }catch(e){return alert("NÃO FOI POSSÍVEL IMPORTAR A PLANILHA.\n\n"+(e.message||"VERIFIQUE O LINK E A PERMISSÃO DE ACESSO."))}
+}else{
+  names=raw.split(/[\n\r\t;]+/).map(n=>n.trim()).filter(n=>n.length>0);
+}
+names=names.map(n=>n.trim().toUpperCase()).filter(Boolean);
+if(!names.length)return alert("NENHUM NOME ENCONTRADO. COLE OS NOMES OU INFORME UM LINK DE PLANILHA VÁLIDO.");
+let existing=new Set(currentSchool.people.filter(p=>(p.shift||"manha")===shift).map(p=>p.name.toUpperCase()));
+let added=0,skipped=0;
+names.forEach(name=>{
+if(existing.has(name)){skipped++;return}
+let id=Date.now()+Math.floor(Math.random()*10000);
+currentSchool.people.push({id,name,note:"",status:"nao_chegou",date,shift,doctor,created:new Date().toISOString()});
+existing.add(name);
+added++;
+});
+save();closeModal();renderPeople();
+alert(`IMPORTAÇÃO CONCLUÍDA!\n\nADICIONADOS: ${added}\nDUPLICADOS IGNORADOS: ${skipped}`);
 }
 function doImport(){
 let raw=document.getElementById("importNames").value;
