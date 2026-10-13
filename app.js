@@ -5,7 +5,18 @@ const SEED_SCHOOLS=[
 const STATUSES=[{key:"espera",label:"EM ESPERA",color:"#e98720"},{key:"atendido",label:"ATENDIDOS",color:"#16834a"},{key:"faltou",label:"FALTOU",color:"#c93434"}];
 let data=loadData(),currentSchoolId=null,currentShift="manha",supa=null,remoteBusy=false,installPrompt=null,dragId=null;
 const syncIds=loadSyncIds();
-function loadData(){try{const d=JSON.parse(localStorage.getItem(KEY)||"null");if(d&&Array.isArray(d.schools))return d}catch(e){}let old=null;try{old=JSON.parse(localStorage.getItem("listta_v1")||"null")}catch(e){}return{schools:SEED_SCHOOLS.map((name,i)=>({id:"seed-"+i,name,people:[]})).concat((old?.schools||[]).map(s=>({...s,id:String(s.id),name:String(s.name||"ESCOLA").toUpperCase(),people:(s.people||[]).map(p=>({...p,id:String(p.id),name:String(p.name||"").toUpperCase(),shift:p.shift||"manha",status:p.status==="atendido"?"atendido":p.status==="faltou"?"faltou":"espera",date:p.date||today()}))})).filter(s=>!SEED_SCHOOLS.includes(s.name)))}
+function loadData(){
+  try{const saved=JSON.parse(localStorage.getItem(KEY)||"null");if(saved&&Array.isArray(saved.schools))return saved}catch(e){}
+  let old=null;try{old=JSON.parse(localStorage.getItem("listta_v1")||"null")}catch(e){}
+  const schools=SEED_SCHOOLS.map((name,i)=>({id:"seed-"+i,name,people:[]}));
+  for(const item of (old&&Array.isArray(old.schools)?old.schools:[])){
+    const name=String(item.name||"ESCOLA").toUpperCase();
+    if(schools.some(s=>s.name===name))continue;
+    const people=(item.people||[]).map(p=>({id:String(p.id||("p-"+Math.random())),name:String(p.name||"").toUpperCase(),note:p.note||"",status:p.status==="atendido"?"atendido":p.status==="faltou"?"faltou":"espera",date:p.date||today(),shift:p.shift||"manha",doctor:p.doctor||"",created:p.created||new Date().toISOString(),star:!!p.star}));
+    schools.push({id:String(item.id||("local-"+Date.now())),name,people});
+  }
+  return {schools};
+}
 function loadSyncIds(){try{return JSON.parse(localStorage.getItem("listta_sync_ids")||'{"schools":{},"people":{}}')}catch(e){return{schools:{},people:{}}}}
 function persist(){localStorage.setItem(KEY,JSON.stringify(data))}
 function today(){const d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-")}
