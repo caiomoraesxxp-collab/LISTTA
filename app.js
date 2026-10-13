@@ -127,8 +127,12 @@ function parseSheetCsv(text){
 }
 function googleSheetCsvUrl(raw){
   let u;try{u=new URL(raw.trim())}catch(e){throw new Error("INFORME UM LINK VÁLIDO DO GOOGLE SHEETS.")}
-  if(!/(^|\.)docs\.google\.com$/.test(u.hostname)||!u.pathname.includes("/spreadsheets/d/"))throw new Error("O LINK PRECISA SER DE UMA PLANILHA DO GOOGLE SHEETS.");
-  const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);if(!m)throw new Error("NÃO CONSEGUI IDENTIFICAR A PLANILHA NO LINK.");
+  if(!/(^|\.)docs\.google\.com$/.test(u.hostname)||!u.pathname.includes("/spreadsheets/"))throw new Error("O LINK PRECISA SER DE UMA PLANILHA DO GOOGLE SHEETS.");
+  if(u.pathname.includes("/spreadsheets/d/e/")&&u.pathname.includes("/pub")){
+    u.searchParams.set("output","csv");
+    return u.toString();
+  }
+  const m=u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);if(!m||m[1]==="e")throw new Error("NÃO CONSEGUI IDENTIFICAR A PLANILHA. USE O LINK NORMAL DA PLANILHA OU O LINK PUBLICADO COMO CSV.");
   const gid=u.searchParams.get("gid")||((u.hash.match(/gid=(\d+)/)||[])[1])||"0";
   return "https://docs.google.com/spreadsheets/d/"+m[1]+"/export?format=csv&gid="+encodeURIComponent(gid);
 }
