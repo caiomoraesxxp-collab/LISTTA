@@ -116,7 +116,7 @@ save();closeModal();renderPeople();
 alert(`IMPORTAÇÃO CONCLUÍDA!\n\nADICIONADOS: ${added}\nDUPLICADOS IGNORADOS: ${skipped}`);
 }
 function addPerson(){
-let name=document.getElementById("personName").value.trim();
+let name=document.getElementById("personName").value.trim().toUpperCase();
 let note=document.getElementById("personNote").value.trim();
 let date=document.getElementById("personDate").value||new Date().toISOString().split("T")[0];
 let shift=document.getElementById("personShift").value;
