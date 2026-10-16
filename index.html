@@ -28,7 +28,10 @@
 <nav class="bottom"><button class="nav active" onclick="showScreen('home',this)">⌂<small>ESCOLAS</small></button><button class="nav" onclick="showScreen('reports',this);renderGlobalReport();renderOldReport()">▤<small>RELATÓRIO</small></button></nav>
 <div id="modal" class="modal" hidden><div class="modal-card"><button class="close" onclick="closeModal()">×</button><h2 id="modalTitle">LISTTA</h2><div id="modalBody"></div></div></div>
 <div id="toast" class="toast" hidden></div>
+<!-- local persistence and patches -->
+<script src="idb.js"></script>
 <script src="patch.js"></script>
+<script src="sessions.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
